@@ -44,6 +44,24 @@ def parse_args() -> argparse.Namespace:
         default=1e-5,
         help="Learning rate used after unfreezing the top backbone layers.",
     )
+    parser.add_argument(
+        "--balance-strategy",
+        choices=["oversample", "none"],
+        default="oversample",
+        help="How to rebalance the training split before fitting.",
+    )
+    parser.add_argument(
+        "--loss",
+        choices=["focal", "crossentropy"],
+        default="focal",
+        help="Training loss. Focal loss helps emphasize harder minority-class errors.",
+    )
+    parser.add_argument(
+        "--focal-gamma",
+        type=float,
+        default=2.0,
+        help="Gamma parameter used when focal loss is enabled.",
+    )
     return parser.parse_args()
 
 
@@ -171,6 +189,53 @@ def compute_class_weights(labels: list[int]) -> dict[int, float]:
     }
 
 
+def rebalance_training_split(
+    filepaths: list[str], labels: list[int], strategy: str, seed: int
+) -> tuple[list[str], list[int], dict[str, int]]:
+    original_counts = Counter(labels)
+    summary = {
+        class_name: original_counts.get(index, 0) for index, class_name in enumerate(CLASS_NAMES)
+    }
+
+    if strategy == "none":
+        return filepaths, labels, summary
+
+    if strategy != "oversample":
+        raise ValueError(f"Unsupported balance strategy: {strategy}")
+
+    rng = random.Random(seed)
+    grouped: dict[int, list[str]] = {index: [] for index in range(len(CLASS_NAMES))}
+    for path, label in zip(filepaths, labels, strict=True):
+        grouped[label].append(path)
+
+    target_count = max(len(paths) for paths in grouped.values())
+    balanced_paths: list[str] = []
+    balanced_labels: list[int] = []
+
+    for label, paths in grouped.items():
+        expanded_paths = paths.copy()
+        if len(expanded_paths) < target_count:
+            expanded_paths.extend(rng.choices(paths, k=target_count - len(expanded_paths)))
+        rng.shuffle(expanded_paths)
+        balanced_paths.extend(expanded_paths)
+        balanced_labels.extend([label] * len(expanded_paths))
+
+    combined = list(zip(balanced_paths, balanced_labels, strict=True))
+    rng.shuffle(combined)
+    balanced_paths = [path for path, _ in combined]
+    balanced_labels = [label for _, label in combined]
+    summary = {class_name: target_count for class_name in CLASS_NAMES}
+    return balanced_paths, balanced_labels, summary
+
+
+def build_loss(loss_name: str, gamma: float) -> tf.keras.losses.Loss | str:
+    if loss_name == "crossentropy":
+        return "categorical_crossentropy"
+    if loss_name == "focal":
+        return tf.keras.losses.CategoricalFocalCrossentropy(gamma=gamma)
+    raise ValueError(f"Unsupported loss: {loss_name}")
+
+
 def main() -> None:
     args = parse_args()
     random.seed(args.seed)
@@ -187,12 +252,23 @@ def main() -> None:
         test_labels,
     ) = stratified_split(filepaths, labels, args.seed)
 
+    original_train_distribution = {
+        class_name: train_labels.count(index) for index, class_name in enumerate(CLASS_NAMES)
+    }
+    train_paths, train_labels, balanced_train_distribution = rebalance_training_split(
+        train_paths,
+        train_labels,
+        args.balance_strategy,
+        args.seed,
+    )
+
     train_dataset = build_dataset(train_paths, train_labels, args.batch_size, training=True)
     val_dataset = build_dataset(val_paths, val_labels, args.batch_size, training=False)
     test_dataset = build_dataset(test_paths, test_labels, args.batch_size, training=False)
 
     model, base_model = build_model()
     class_weights = compute_class_weights(train_labels)
+    loss = build_loss(args.loss, args.focal_gamma)
 
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
@@ -210,7 +286,7 @@ def main() -> None:
 
     model.compile(
         optimizer=tf.keras.optimizers.Adam(args.learning_rate),
-        loss="categorical_crossentropy",
+        loss=loss,
         metrics=["accuracy"],
     )
     model.fit(
@@ -227,7 +303,7 @@ def main() -> None:
 
     model.compile(
         optimizer=tf.keras.optimizers.Adam(args.fine_tune_learning_rate),
-        loss="categorical_crossentropy",
+        loss=loss,
         metrics=["accuracy"],
     )
     model.fit(
@@ -255,6 +331,16 @@ def main() -> None:
         "test_metrics": {
             "loss": float(test_loss),
             "accuracy": float(test_accuracy),
+        },
+        "training_configuration": {
+            "balance_strategy": args.balance_strategy,
+            "loss": args.loss,
+            "focal_gamma": args.focal_gamma if args.loss == "focal" else None,
+            "original_train_distribution": original_train_distribution,
+            "balanced_train_distribution": balanced_train_distribution,
+            "class_weights": {
+                CLASS_NAMES[label]: round(weight, 4) for label, weight in class_weights.items()
+            },
         },
     }
     METADATA_PATH.write_text(json.dumps(metadata, indent=2), encoding="utf-8")

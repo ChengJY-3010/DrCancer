@@ -9,7 +9,7 @@
     224
   ],
   "splits": {
-    "train": 550,
+    "train": 921,
     "validation": 115,
     "test": 115
   },
@@ -19,7 +19,27 @@
     "normal": 133
   },
   "test_metrics": {
-    "loss": 0.8615652918815613,
-    "accuracy": 0.573913037776947
+    "loss": 0.09425345808267593,
+    "accuracy": 0.6086956262588501
+  },
+  "training_configuration": {
+    "balance_strategy": "oversample",
+    "loss": "focal",
+    "focal_gamma": 2.0,
+    "original_train_distribution": {
+      "benign": 307,
+      "malignant": 148,
+      "normal": 95
+    },
+    "balanced_train_distribution": {
+      "benign": 307,
+      "malignant": 307,
+      "normal": 307
+    },
+    "class_weights": {
+      "benign": 1.0,
+      "normal": 1.0,
+      "malignant": 1.0
+    }
   }
 }
