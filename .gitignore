@@ -1,0 +1,16 @@
+.next
+node_modules
+__pycache__
+backend/__pycache__
+backend/outputs
+backend/uploads
+backend/models/.keras-cache
+backend/models/*.keras
+backend/models/*.h5
+backend/models/*.png
+backend/models/*.jpg
+backend/models/*.jpeg
+.venv
+Dataset_BUSI_with_GT
+tmp
+*.tsbuildinfo

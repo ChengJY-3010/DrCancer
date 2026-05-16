@@ -1,0 +1,25 @@
+{
+  "class_names": [
+    "benign",
+    "malignant",
+    "normal"
+  ],
+  "image_size": [
+    224,
+    224
+  ],
+  "splits": {
+    "train": 550,
+    "validation": 115,
+    "test": 115
+  },
+  "class_distribution": {
+    "benign": 437,
+    "malignant": 210,
+    "normal": 133
+  },
+  "test_metrics": {
+    "loss": 0.8615652918815613,
+    "accuracy": 0.573913037776947
+  }
+}
